@@ -409,15 +409,15 @@ class SeekAndSort(QObject):
             old_artist = meta_data['artist']  # 取出文件artist
             old_album = meta_data['album']  # 取出文件album
             if old_title and self.is_ascii(old_title):  # 判断title是否有ascii字符
-                new_title = ascii_to_utf8(old_title)  # 将ascii字符转换为'utf-8'编码
+                new_title = self.ascii_to_utf8(old_title)  # 将ascii字符转换为'utf-8'编码
             else:
                 new_title = old_title
             if old_artist and self.is_ascii(old_artist):  # 判断artist是否有ascii字符
-                new_artist = ascii_to_utf8(old_artist)  # 将ascii字符转换为'utf-8'编码
+                new_artist = self.ascii_to_utf8(old_artist)  # 将ascii字符转换为'utf-8'编码
             else:
                 new_artist = old_artist
             if old_album and self.is_ascii(old_album):  # 判断album是否有ascii字符
-                old_album = ascii_to_utf8(old_album)  # 将ascii字符转换为'utf-8'编码
+                old_album = self.ascii_to_utf8(old_album)  # 将ascii字符转换为'utf-8'编码
                 meta_data['album'] = old_album  # 更新文件元数据字典album
             if new_title and new_title != ' ':  # 判断title是否为空
                 new_title = self.check_char(old_title, old_artist)  # 处理title中无意义字符
@@ -942,9 +942,9 @@ class SeekAndSort(QObject):
         """
         try:
             base_name = basename(filename)  # 获取不带路径的文件名
-            name = splitext(base_name)[0]  # 不包含路径和扩展名的文件名
+            name = splitext(base_name)[0]   # 不包含路径和扩展名的文件名
             if self.is_ascii(name):  # 判断文件名是否为ascii字符
-                name = ascii_to_utf8(name)  # 将ascii字符转换为utf8字符
+                name = self.ascii_to_utf8(name)  # 将ascii字符转换为utf8字符
             dir_path = f"{dirname(filename)}/"  # 按照文件名切割得到文件路径
             with open(filename, 'rb') as f:  # 打开文件
                 data = f.read(6)  # 读取6个字节
@@ -1371,41 +1371,65 @@ class SeekAndSort(QObject):
                 self.finished_signal.emit("move_sort_failed_finish")
             self.rm_empty_dir(self.base_path)  # 删除空文件夹
 
-def ascii_to_utf8(asc_s):
-    """
-    将ascii编码字符转换为utf8编码
-    :param asc_s: ascii str
-    :return: utf8 str
-    """
-    if not asc_s:  # 判断字符串是否为空
-        return
-    if all(ord(s) <= 255 for s in asc_s):  # 判断字符串所有字符是否都为ascii字符
-        return asc_s.encode('iso-8859-1').decode('gbk').encode('utf8').decode('utf8')  # 整个字符串转换编码
-    else:  # 否则部分字符为ascii编码, 将ascii字符和其他编码字符逐一分开转码
+    def ascii_to_utf8(self, asc_s):
+        """
+        将ascii编码字符转换为utf8编码
+        :param asc_s: ascii str
+        :return: utf8 str
+        """
+        if not asc_s:  # 判断字符串是否为空
+            return
+        if all(ord(s) <= 255 for s in asc_s):  # 判断字符串所有字符是否都为ascii字符
+            try:
+                return asc_s.encode('iso-8859-1').decode('gbk').encode('utf8').decode('utf8')  # 整个字符串转换编码
+            except Exception as e:  # 异常捕捉
+                except_s = str(e)   # 将异常对象转换为字符串异常信息
+                if 'position' in except_s:  #　判断异常信息中是否包含'position'
+                    # 获取解码异常字符在字符串中的索引位置
+                    ind = ''.join([i for i in except_s.split('position')[1][:4] if str.isdigit(i)])
+                    asc_s = asc_s.replace(asc_s[int(ind)], '')  # 将解码异常的字符替换为空
+                    return self.ascii_to_utf8(asc_s)    # 递归调用自己重新解码
+        else:  # 否则字符中混合有ascii编码字符和其他编码字符, 将ascii字符和其他编码字符拆分后解码
+            return self.split_char_decode(asc_s)
+
+    def split_char_decode(self, asc_s):
+        """
+        对字符串中混合有ascii编码字符和其他编码字符进行拆分后单独解码
+        :param asc_s: str 混合编码字符串
+        :return: utf-8 str
+        """
         length = len(asc_s)  # 获取字符串长度
         start_ind = 0  # 定义变量用作截取字符的开始索引
         decode_list = []  # 将截取出来的字符转码后追加到列表
         for i in range(length):  # 遍历字符串获取每个字符
-            if i >= length:  # 如果索引大于等于字符串长度
-                break  # 结束循环
-            if i == length - 1:  # 如果索引等于字符串长度减一
-                wait_decode = asc_s[start_ind: length]  # 最后一次判断字符编码时直接执行到循环结束并未截取字符,将最后的字符截取出来
-                if ord(wait_decode[0]) <= 255:  # 判断最后一次截取的字符第一个元素是否为ascii字符
+            try:
+                if i >= length:  # 如果索引大于等于字符串长度
+                    break  # 结束循环
+                if i == length - 1:  # 如果索引等于字符串长度减一
+                    wait_decode = asc_s[start_ind: length]  # 最后一次判断字符编码时直接执行到循环结束并未截取字符,将最后的字符截取出来
+                    if ord(wait_decode[0]) <= 255:  # 判断最后一次截取的字符第一个元素是否为ascii字符
+                        # 转码并追加至列表
+                        decode_list.append(wait_decode.encode('iso-8859-1').decode('gbk').encode('utf-8').decode('utf-8'))
+                    elif ord(wait_decode[0]) > 255:  # 判断最后一次截取的字符第一个元素是否不是ascii字符
+                        decode_list.append(wait_decode.encode('utf-8').decode('utf-8'))  # 转码并追加至列表
+                    break
+                if ord(asc_s[i]) <= 255 and ord(asc_s[i + 1]) > 255:  # 判断当前索引的元素是否为ascii字符并且下一个字符不是ascii字符
+                    end_ind = i  # 定义变量用作截取字符的结束索引
+                    wait_decode: object = asc_s[start_ind: end_ind + 1]  # 截取ascii字符
                     # 转码并追加至列表
                     decode_list.append(wait_decode.encode('iso-8859-1').decode('gbk').encode('utf-8').decode('utf-8'))
-                elif ord(wait_decode[0]) > 255:  # 判断最后一次截取的字符第一个元素是否不是ascii字符
-                    decode_list.append(wait_decode.encode('utf-8').decode('utf-8'))  # 转码并追加至列表
-                break
-            if ord(asc_s[i]) <= 255 and ord(asc_s[i + 1]) > 255:  # 判断当前索引的元素是否为ascii字符并且下一个字符不是ascii字符
-                end_ind = i  # 定义变量用作截取字符的结束索引
-                wait_decode: object = asc_s[start_ind: end_ind + 1]  # 截取ascii字符
-                # 转码并追加至列表
-                decode_list.append(wait_decode.encode('iso-8859-1').decode('gbk').encode('utf-8').decode('utf-8'))
-                start_ind = end_ind + 1  # 将本次截取字符的结束索引作为下一次截取的开始索引
-                continue  # 跳过循环
-            if ord(asc_s[i]) > 255 and ord(asc_s[i + 1]) <= 255:  # 判断当前索引的字符不是ascii字符并且下一个字符是ascii字符
-                end_ind = i  # 将当前索引赋值给截取字符的结束索引
-                decode_list.append(asc_s[start_ind: end_ind + 1].encode('utf-8').decode('utf-8'))  # 截取字符并转码后追加至列表
-                start_ind = end_ind + 1  # 将当前索引赋值给截取字符的结束索引
-                continue  # 跳过循环
-    return ''.join(decode_list)  # 连接列表所有转码后的元素并返回
+                    start_ind = end_ind + 1  # 将本次截取字符的结束索引作为下一次截取的开始索引
+                    continue  # 跳过循环
+                if ord(asc_s[i]) > 255 and ord(asc_s[i + 1]) <= 255:  # 判断当前索引的字符不是ascii字符并且下一个字符是ascii字符
+                    end_ind = i  # 将当前索引赋值给截取字符的结束索引
+                    decode_list.append(asc_s[start_ind: end_ind + 1].encode('utf-8').decode('utf-8'))  # 截取字符并转码后追加至列表
+                    start_ind = end_ind + 1  # 将当前索引赋值给截取字符的结束索引
+                    continue  # 跳过循环
+            except Exception as e:  # 异常捕捉
+                except_s = str(e)   # 将异常信息对象转换为字符串异常信息
+                if 'position' in except_s:  #　判断异常信息中是否包含'position'
+                    # 获取解码异常字符在字符串中的索引位置
+                    ind = ''.join([i for i in except_s.split('position')[1][:4] if str.isdigit(i)])
+                    asc_s = asc_s.replace(asc_s[int(ind)], '')  # 将出现异常的字符替换为空
+                    return self.split_char_decode(asc_s)    # 递归调用自己重新解码
+        return ''.join(decode_list)  # 连接列表所有转码后的元素并返回
